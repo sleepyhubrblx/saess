@@ -1,44 +1,19 @@
--- ══════════════════════════════════════════════════════════════════════════════
--- SLEEPY HUB — Universal ScriptLoader (free)
--- Checks game.PlaceId → loads library ONCE → downloads & runs the right script.
--- Fully open source: everything is plain Lua on GitHub, no encryption.
---
--- FAST + STALE-PROOF:
---  * Downloads are cached for 5 minutes per session, so re-running the script
---    is instant instead of re-downloading ~250 KB every time.
---  * GitHub's raw CDN can briefly serve an old copy right after an upload.
---    Every library download is verified against a marker ("ChatFree", present
---    only in the current build) and a stale copy is re-fetched with a fresh
---    cache-buster until the current build arrives — a stale library is NEVER
---    executed, so the old chat-era hub can never come back.
--- ══════════════════════════════════════════════════════════════════════════════
-
--- ══════════════════════════════════════════════════════════════════════════════
--- CONFIG
--- ══════════════════════════════════════════════════════════════════════════════
 local CFG = {
     LIB_URL      = "local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/sleepyhubrblx/saess/main/UiLibrary/Library.lua"))()",
-    -- Base URL for stripped game scripts (github raw).
+    
     SCRIPTS_BASE = "local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/sleepyhubrblx/saess/main/scripts/Library.lua"))()",
-    -- Fallback script when PlaceId doesn't match any known game
+   
     FALLBACK  = "Universal.lua",
 }
 
--- Pretty game names shown on the statistics page (fallback = script name).
 local GAME_NAMES = {
     [107778070777162]  = "Steal an Egg",
     [142823291]        = "MM2",
 }
 
--- Always use the stable public library.
+local LIB_MARKER  = "ChatFree"   
+local CACHE_TTL   = 300          
 
--- ══════════════════════════════════════════════════════════════════════════════
--- CACHE + STALE-PROTECTION
--- ══════════════════════════════════════════════════════════════════════════════
-local LIB_MARKER  = "ChatFree"   -- marker string that ONLY exists in the current (chat-free) library build
-local CACHE_TTL   = 300          -- seconds a downloaded file is reused before a refresh
-
--- Session-wide download cache (survives re-executions of this script).
 local SLEEPY_CACHE = _G.SleepyLoaderCache or {}
 _G.SleepyLoaderCache = SLEEPY_CACHE
 
@@ -53,9 +28,6 @@ local function cacheSet(key, value)
     SLEEPY_CACHE[key] = { at = os.clock(), value = value }
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
--- STATS TRACKING — fire-and-forget, never blocks or errors the load
--- ══════════════════════════════════════════════════════════════════════════════
 local function urlencode(s)
     return (string.gsub(tostring(s), "[^%w%-%_%.%~]", function(c)
         return string.format("%%%02X", string.byte(c))
@@ -77,27 +49,16 @@ local function GetExecutor()
     return ""
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
--- PLACE-ID → SCRIPT MAPPING
--- Add new games here: [PlaceId] = "ScriptName.lua"
--- ══════════════════════════════════════════════════════════════════════════════
--- Declared BEFORE Track so Track's closure captures it as an upvalue (a local
--- declared later would resolve to the nil global instead).
 local GAME_MAP = {
     [107778070777162]  = "StealAnEgg.lua",          -- Ein Ei stehlen 🥚
     [142823291]        = "Mm2.lua",                 -- MM2 🔪
     -- [PlaceId] = "Script.lua",  ← füg neue Games hier hinzu
 }
 
--- Universe (GameId) → script: catches EVERY place under a game, so new/other
--- places of the same universe don't fall back to Universal.lua.
-
 local function ResolveScript(pid, gid)
     return GAME_MAP[pid] or GAME_MAP_BY_GAMEID[gid] or CFG.FALLBACK
 end
 
--- Track resolves placeId/scriptName itself (self-contained, correct at call
--- time even though MAIN declares its own locals later).
 local function Track(kind)
     if not CFG.TRACK_URL then return end
     local pid = game.PlaceId
@@ -125,9 +86,6 @@ local function Track(kind)
     end)
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
--- FETCH: downloads a text file from a URL (tries request() then game.HttpGet)
--- ══════════════════════════════════════════════════════════════════════════════
 local function FetchRaw(url)
     if type(request) == "function" then
         local ok, req = pcall(request, { Url = url, Method = "GET" })
@@ -148,10 +106,6 @@ local function CacheBust(url)
     return url .. sep .. "cb=" .. tostring(os.time()) .. tostring(math.random(100000, 999999))
 end
 
--- GitHub's raw CDN can keep serving a stale copy for a while after an upload,
--- and it ignores cache-busters and client Cache-Control headers. The GitHub
--- contents API (api.github.com) is never CDN-cached, so it always returns the
--- newest commit — it is used as the final, guaranteed-fresh fallback.
 local function FetchApiRaw(apiPath)
     if type(request) ~= "function" then return false, nil end
     local ok, req = pcall(request, {
@@ -167,13 +121,8 @@ local function FetchApiRaw(apiPath)
         return true, req.Body
     end
     return false, nil
+    
 end
-
--- Fetch a file, refusing anything that lacks `marker` (i.e. a stale CDN copy).
--- Attempt 1 uses the plain URL (fast edge-cache hit), attempts 2-3 retry with
--- a cache-buster while the CDN refreshes, and the last resort is the fresh
--- contents-API fallback. A stale body is NEVER returned.
--- Returns: ok, body, attempt (4 = came from the API fallback)
 local function FetchFresh(url, marker, minBytes, apiPath)
     minBytes = minBytes or 100
     for attempt = 1, 3 do
@@ -204,8 +153,7 @@ local function LibraryUsable(lib)
 end
 
 local function LoadLibrary()
-    -- Fast path: reuse a chat-free library already fetched this session, so
-    -- re-running the hub costs zero downloads.
+   
     local cached = cacheGet("lib")
     if LibraryUsable(cached) then
         print("[Loader] Library reused from cache (v" .. tostring(cached.Version or "?") .. ") — no download needed.")
@@ -239,9 +187,6 @@ local function LoadLibrary()
     return lib
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
--- LOAD GAME SCRIPT (download → prepend Library shim → execute)
--- ══════════════════════════════════════════════════════════════════════════════
 local function LoadGameScript(lib, scriptName)
     local content = cacheGet("script:" .. scriptName)
     local fromCache = content ~= nil
@@ -255,9 +200,6 @@ local function LoadGameScript(lib, scriptName)
         cacheSet("script:" .. scriptName, content)
     end
 
-    -- Use a global library binding here. Some scripts are close to Luau's
-    -- 200-local register limit, so adding another local in the loader can make
-    -- the stripped chunk fail before its UI is created.
     local fullSource = "Library = _G.SleepyLib;\n" .. content
 
     local chunk, compileErr = loadstring(fullSource)
@@ -272,9 +214,6 @@ local function LoadGameScript(lib, scriptName)
     return fromCache
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
--- MAIN
--- ══════════════════════════════════════════════════════════════════════════════
 local placeId = game.PlaceId
 local gameId = game.GameId
 local scriptName = ResolveScript(placeId, gameId)
@@ -284,14 +223,12 @@ print("[Loader] PlaceId:", placeId, " GameId:", gameId, "→", scriptName)
 local t0 = os.clock()
 local Library = LoadLibrary()
 
--- Expose globally (stripped scripts grab it via local Library = _G.SleepyLib)
 _G.SleepyLib = Library
 
 local scriptCached = LoadGameScript(Library, scriptName)
 print(string.format("[Loader] %s is now running (script %s, total %.2fs).",
     scriptName, scriptCached and "from cache" or "downloaded", os.clock() - t0))
 
--- Report the successful load, then keep a heartbeat alive for the Live tab.
 Track("launch")
 pcall(task.spawn, function()
     while true do
