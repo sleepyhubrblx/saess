@@ -1,8 +1,3 @@
--- SleepyUiLibary2 minimal loader
--- Loads UiLibary/Libary.lua, then the correct game script for the PlaceId.
--- Fast + stale-proof: the library is cached per session (instant re-runs) and
--- every download is verified against the "ChatFree" build marker so a stale
--- chat-era CDN copy is never executed.
 local LIB_URL = "local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/sleepyhubrblx/saess/main/UiLibrary/Library.lua"))()"
 local SCRIPTS_BASE = "local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/sleepyhubrblx/saess/main/scripts/Library.lua"))()"
 local CACHE_TTL = 300
